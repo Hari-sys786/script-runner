@@ -12,10 +12,10 @@ import threading
 import time
 
 try:
-    from flask import Flask, render_template_string, request, jsonify
+    from flask import Flask, render_template_string, request, jsonify, redirect, url_for, session as flask_session
 except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "flask", "--break-system-packages"])
-    from flask import Flask, render_template_string, request, jsonify
+    from flask import Flask, render_template_string, request, jsonify, redirect, url_for, session as flask_session
 
 try:
     from openpyxl import load_workbook
@@ -24,6 +24,10 @@ except ImportError:
     from openpyxl import load_workbook
 
 app = Flask(__name__)
+app.secret_key = 'servermanager_v2_secret_key_2026'
+
+ADMIN_USER = 'admin'
+ADMIN_PASS = 'admin123'
 
 EXCEL_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "servers.xlsx")
 
@@ -53,6 +57,138 @@ def load_excel():
     wb.close()
     return data
 
+
+LOGIN_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>⚡ Server Manager — Login</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #1e1e2e;
+            color: #cdd6f4;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-card {
+            background: #2a2a3c;
+            border-radius: 16px;
+            padding: 40px;
+            width: 380px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        }
+        .login-card .icon {
+            text-align: center;
+            font-size: 48px;
+            margin-bottom: 8px;
+        }
+        .login-card h1 {
+            text-align: center;
+            font-size: 22px;
+            color: #89b4fa;
+            margin-bottom: 4px;
+        }
+        .login-card .subtitle {
+            text-align: center;
+            color: #6c7086;
+            font-size: 13px;
+            margin-bottom: 28px;
+        }
+        .form-group {
+            margin-bottom: 16px;
+        }
+        .form-group label {
+            display: block;
+            font-size: 12px;
+            color: #6c7086;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            font-weight: 600;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 11px 14px;
+            background: #313244;
+            color: #cdd6f4;
+            border: 1px solid #45475a;
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: inherit;
+            transition: border-color 0.2s;
+        }
+        .form-group input:focus {
+            outline: none;
+            border-color: #89b4fa;
+            box-shadow: 0 0 0 2px rgba(137,180,250,0.2);
+        }
+        .form-group input::placeholder {
+            color: #585b70;
+        }
+        .btn-login {
+            width: 100%;
+            padding: 12px;
+            background: #89b4fa;
+            color: #1e1e2e;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: inherit;
+            margin-top: 8px;
+        }
+        .btn-login:hover { background: #74c7ec; }
+        .btn-login:active { transform: scale(0.98); }
+        .error-msg {
+            background: rgba(243,139,168,0.15);
+            border: 1px solid #f38ba8;
+            color: #f38ba8;
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            margin-bottom: 16px;
+            text-align: center;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 20px;
+            color: #45475a;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <div class="icon">⚡</div>
+        <h1>Server Manager</h1>
+        <p class="subtitle">Sign in to continue</p>
+        {% if error %}
+        <div class="error-msg">{{ error }}</div>
+        {% endif %}
+        <form method="POST" action="/login">
+            <div class="form-group">
+                <label>Username</label>
+                <input type="text" name="username" placeholder="Enter username" autofocus required>
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" name="password" placeholder="Enter password" required>
+            </div>
+            <button type="submit" class="btn-login">Sign In</button>
+        </form>
+        <div class="footer">Server Manager v2.0</div>
+    </div>
+</body>
+</html>
+"""
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -318,9 +454,12 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <h1>⚡ Server Manager</h1>
-            <p>Bank → Server → Application → Refresh / Restart</p>
+        <div class="header" style="display:flex; justify-content:space-between; align-items:flex-start;">
+            <div>
+                <h1>⚡ Server Manager</h1>
+                <p>Bank → Server → Application → Refresh / Restart</p>
+            </div>
+            <a href="/logout" class="btn btn-secondary" style="text-decoration:none; margin-top:4px; font-size:13px;">🚪 Logout</a>
         </div>
 
         <div class="card">
@@ -575,11 +714,37 @@ HTML_TEMPLATE = """
 
 @app.route('/')
 def index():
+    if not flask_session.get('logged_in'):
+        return redirect(url_for('login'))
     return render_template_string(HTML_TEMPLATE)
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if flask_session.get('logged_in'):
+        return redirect(url_for('index'))
+    error = None
+    if request.method == 'POST':
+        username = request.form.get('username', '')
+        password = request.form.get('password', '')
+        if username == ADMIN_USER and password == ADMIN_PASS:
+            flask_session['logged_in'] = True
+            return redirect(url_for('index'))
+        else:
+            error = 'Invalid username or password'
+    return render_template_string(LOGIN_TEMPLATE, error=error)
+
+
+@app.route('/logout')
+def logout():
+    flask_session.clear()
+    return redirect(url_for('login'))
 
 
 @app.route('/api/data')
 def get_data():
+    if not flask_session.get('logged_in'):
+        return jsonify({"error": "unauthorized"}), 401
     return jsonify(load_excel())
 
 
