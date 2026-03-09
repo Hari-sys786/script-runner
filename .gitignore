@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+scripts.xlsx
+screenshot.png
+venv/
